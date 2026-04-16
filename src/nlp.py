@@ -573,7 +573,7 @@ def print_strengths_weaknesses(merged: pd.DataFrame, target_name: str, top_n: in
 # STAGE 9 — FINAL PIPELINE
 # ══════════════════════════════════════════════════════════════════════
 
-def run_nlp_pipeline(df: pd.DataFrame, target: str = TARGET) -> dict:
+def run_nlp_pipeline(df: pd.DataFrame, target: str) -> dict:
     """
     Execute the complete NLP topic + sentiment pipeline.
 

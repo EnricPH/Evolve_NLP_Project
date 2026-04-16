@@ -429,11 +429,11 @@ def plot_stars_positioning(stats: pd.DataFrame, CAT: str, target: str) -> None:
     fig, ax = plt.subplots(figsize=(11, 4))
 
     # Distribution of competitors
-    sns.histplot(others, bins=20, stat='density', color='#4C72B0',
+    sns.histplot(others, bins=10, stat='density', color='#4C72B0',
                  alpha=0.35, edgecolor='white', ax=ax, label='Competitors')
-    sns.kdeplot(others, color='#4C72B0', linewidth=1.8, ax=ax)
+    #sns.kdeplot(others, color='#4C72B0', linewidth=1.8, ax=ax)
 
-    ax.set_xlim(0.5, 5.5)
+    ax.set_xlim(0.75, 5.25)
     ax.set_ylim(bottom=0)
 
     pct = _add_percentile_band(ax, others, target_val, '#d62728', f'{target} (target)')
@@ -643,7 +643,8 @@ def plot_word_count_by_sentiment(stats: pd.DataFrame, target: str) -> None:
             fontsize=9, fontweight='bold', color=color, va='center',
             arrowprops=dict(arrowstyle='->', color=color, lw=1.2)
         )
-
+    
+    ax.set_ylim(bottom=0, top=150)
     ax.set_xticks(positions)
     ax.set_xticklabels([t for _, t, _ in tiers], fontsize=11)
     ax.set_ylabel("Avg Words per Review")

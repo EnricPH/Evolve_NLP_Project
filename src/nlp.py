@@ -17,8 +17,8 @@ from transformers import pipeline as hf_pipeline
 
 SBERT_MODEL    = "all-MiniLM-L6-v2"          # fast, good quality
 SENTIMENT_MODEL = "cardiffnlp/twitter-roberta-base-sentiment-latest"
-MIN_TOPIC_SIZE  = 35                          # min reviews per topic
-N_TOP_WORDS     = 10                           # words shown per topic
+MIN_TOPIC_SIZE  = 50                         # min reviews per topic
+N_TOP_WORDS     = 15                           # words shown per topic
 RANDOM_STATE    = 42
 
 

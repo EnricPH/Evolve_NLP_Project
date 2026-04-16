@@ -476,7 +476,7 @@ def plot_sentiment_pct_comparison(stats: pd.DataFrame, target: str) -> None:
     # Build comparison rows
     rows = {
         target                        : trow,
-        'Sector average'              : sector.mean(numeric_only=True),
+        'Sector median'              : sector.median(numeric_only=True),
         f"Best (★ {sector['avg_stars'].max():.2f})" : sector.loc[sector['avg_stars'].idxmax()],
         f"Worst (★ {sector['avg_stars'].min():.2f})": sector.loc[sector['avg_stars'].idxmin()],
     }

@@ -99,36 +99,96 @@ def add_length_features(df: pd.DataFrame) -> pd.DataFrame:
 # ══════════════════════════════════════════════════════════════════════
 
 def company_stats(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Compute per-company aggregate statistics.
+    # """
+    # Compute per-company aggregate statistics.
 
-    Aggregates:
-        - review_count       : total number of reviews
-        - avg_stars          : mean star rating
-        - pct_positive       : % of reviews with stars >= 4
-        - pct_negative       : % of reviews with stars <= 2
-        - avg_review_words   : mean word count of reviews
-        - avg_title_words    : mean word count of titles
+    # Aggregates:
+    #     - review_count       : total number of reviews
+    #     - avg_stars          : mean star rating
+    #     - pct_positive       : % of reviews with stars >= 4
+    #     - pct_negative       : % of reviews with stars <= 2
+    #     - avg_review_words   : mean word count of reviews
+    #     - avg_title_words    : mean word count of titles
+
+    # Parameters
+    # ----------
+    # df : pd.DataFrame
+    #     DataFrame output of add_length_features().
+
+    # Returns
+    # -------
+    # pd.DataFrame
+    #     One row per company, sorted by avg_stars descending.
+    # """
+    # stats = df.groupby('company').agg(
+    #     review_count     = ('review', 'count'),
+    #     avg_stars        = ('stars',  'mean'),
+    #     pct_positive     = ('stars',  lambda x: (x >= 4).mean() * 100),
+    #     pct_negative     = ('stars',  lambda x: (x <= 2).mean() * 100),
+    #     avg_review_words = ('review_word_count', 'mean'),
+    #     avg_title_words  = ('title_word_count',  'mean'),
+    # ).round(2).sort_values('avg_stars', ascending=False)
+
+    # return stats
+
+
+
+    """
+    Compute per-company statistics needed for positioning charts.
+
+    Metrics computed:
+        avg_stars        : mean star rating
+        pct_positive     : % reviews with stars >= 4
+        pct_neutral      : % reviews with stars == 3
+        pct_negative     : % reviews with stars <= 2
+        avg_review_words : mean word count of reviews
+        avg_title_words  : mean word count of titles
+        review_word_count: mean review word count (all reviews)
+        wc_positive      : mean word count of positive reviews (stars>=4)
+        wc_neutral       : mean word count of neutral reviews (stars==3)
+        wc_negative      : mean word count of negative reviews (stars<=2)
+        review_count     : total number of reviews
 
     Parameters
     ----------
     df : pd.DataFrame
-        DataFrame output of add_length_features().
+        Cleaned category DataFrame with 'review', 'stars', 'company'.
 
     Returns
     -------
     pd.DataFrame
-        One row per company, sorted by avg_stars descending.
+        One row per company.
     """
-    stats = df.groupby('company').agg(
-        review_count     = ('review', 'count'),
-        avg_stars        = ('stars',  'mean'),
-        pct_positive     = ('stars',  lambda x: (x >= 4).mean() * 100),
-        pct_negative     = ('stars',  lambda x: (x <= 2).mean() * 100),
-        avg_review_words = ('review_word_count', 'mean'),
-        avg_title_words  = ('title_word_count',  'mean'),
-    ).round(2).sort_values('avg_stars', ascending=False)
+    df = df.copy()
+    df['word_count'] = df['review'].fillna('').str.split().str.len()
 
+    # stats = df.groupby('company').apply(lambda g: pd.Series({
+    #     'avg_stars'        : g['stars'].mean(),
+    #     'pct_positive'     : (g['stars'] >= 4).mean() * 100,
+    #     'pct_neutral'      : (g['stars'] == 3).mean() * 100,
+    #     'pct_negative'     : (g['stars'] <= 2).mean() * 100,
+    #     'avg_review_words' : g['review_word_count'].mean(),
+    #     'avg_title_words'  : g['title_word_count'].mean(),
+    #     'review_word_count': g['word_count'].mean(),
+    #     'wc_positive'      : g.loc[g['stars'] >= 4, 'word_count'].mean(),
+    #     'wc_neutral'       : g.loc[g['stars'] == 3, 'word_count'].mean(),
+    #     'wc_negative'      : g.loc[g['stars'] <= 2, 'word_count'].mean(),
+    #     'review_count'     : len(g),
+    # })).round(2).sort_values('avg_stars', ascending=False)
+    stats = df.groupby('company').agg(
+        avg_stars        = ('stars', 'mean'),
+        pct_positive     = ('stars', lambda x: (x >= 4).mean() * 100),
+        pct_neutral      = ('stars', lambda x: (x == 3).mean() * 100),
+        pct_negative     = ('stars', lambda x: (x <= 2).mean() * 100),
+        avg_review_words = ('review_word_count', 'mean'),
+        avg_title_words  = ('title_word_count', 'mean'),
+        review_word_count = ('word_count', 'mean'),
+        wc_positive      = ('word_count', lambda x: x[df.loc[x.index, 'stars'] >= 4].mean() if any(df.loc[x.index, 'stars'] >= 4) else 0),
+        wc_neutral       = ('word_count', lambda x: x[df.loc[x.index, 'stars'] == 3].mean() if any(df.loc[x.index, 'stars'] == 3) else 0),
+        wc_negative      = ('word_count', lambda x: x[df.loc[x.index, 'stars'] <= 2].mean() if any(df.loc[x.index, 'stars'] <= 2) else 0),
+        review_count     = ('review', 'count')
+    ).round(2).sort_values('avg_stars', ascending=False)
+    #.reset_index()
     return stats
 
 
@@ -345,48 +405,6 @@ def display_company_summary(stats: pd.DataFrame, top_n: int = 20) -> pd.DataFram
 # ══════════════════════════════════════════════════════════════════════
 # ══════════════════════════════════════════════════════════════════════
 
-def build_stats(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Compute per-company statistics needed for positioning charts.
-
-    Metrics computed:
-        avg_stars        : mean star rating
-        pct_positive     : % reviews with stars >= 4
-        pct_neutral      : % reviews with stars == 3
-        pct_negative     : % reviews with stars <= 2
-        review_word_count: mean review word count (all reviews)
-        wc_positive      : mean word count of positive reviews (stars>=4)
-        wc_neutral       : mean word count of neutral reviews (stars==3)
-        wc_negative      : mean word count of negative reviews (stars<=2)
-        review_count     : total number of reviews
-
-    Parameters
-    ----------
-    df : pd.DataFrame
-        Cleaned category DataFrame with 'review', 'stars', 'company'.
-
-    Returns
-    -------
-    pd.DataFrame
-        One row per company.
-    """
-    df = df.copy()
-    df['word_count'] = df['review'].fillna('').str.split().str.len()
-
-    stats = df.groupby('company').apply(lambda g: pd.Series({
-        'avg_stars'        : g['stars'].mean(),
-        'pct_positive'     : (g['stars'] >= 4).mean() * 100,
-        'pct_neutral'      : (g['stars'] == 3).mean() * 100,
-        'pct_negative'     : (g['stars'] <= 2).mean() * 100,
-        'review_word_count': g['word_count'].mean(),
-        'wc_positive'      : g.loc[g['stars'] >= 4, 'word_count'].mean(),
-        'wc_neutral'       : g.loc[g['stars'] == 3, 'word_count'].mean(),
-        'wc_negative'      : g.loc[g['stars'] <= 2, 'word_count'].mean(),
-        'review_count'     : len(g),
-    })).reset_index()
-
-    return stats
-
 
 def _percentile_rank(series: pd.Series, value: float) -> float:
     """Return the percentile rank (0–100) of *value* within *series*."""
@@ -420,7 +438,7 @@ def plot_stars_positioning(stats: pd.DataFrame, CAT: str, target: str) -> None:
 
     Parameters
     ----------
-    stats  : pd.DataFrame   output of build_stats()
+    stats  : pd.DataFrame   output of company_stats()
     target : str            company name (must match stats index/column)
     """
     target_val = stats.loc[stats['company'] == target, 'avg_stars'].values[0]
@@ -433,7 +451,7 @@ def plot_stars_positioning(stats: pd.DataFrame, CAT: str, target: str) -> None:
                  alpha=0.35, edgecolor='white', ax=ax, label='Competitors')
     #sns.kdeplot(others, color='#4C72B0', linewidth=1.8, ax=ax)
 
-    ax.set_xlim(0.75, 5.25)
+    ax.set_xlim(2.5, 5.25)
     ax.set_ylim(bottom=0)
 
     pct = _add_percentile_band(ax, others, target_val, '#d62728', f'{target} (target)')
@@ -467,7 +485,7 @@ def plot_sentiment_pct_comparison(stats: pd.DataFrame, target: str) -> None:
 
     Parameters
     ----------
-    stats  : pd.DataFrame   output of build_stats()
+    stats  : pd.DataFrame   output of company_stats()
     target : str            company name
     """
     trow    = stats[stats['company'] == target].iloc[0]
@@ -533,7 +551,7 @@ def plot_percentile_dashboard(stats: pd.DataFrame, CAT: str, target: str) -> Non
 
     Parameters
     ----------
-    stats  : pd.DataFrame   output of build_stats()
+    stats  : pd.DataFrame   output of company_stats()
     target : str            company name
     """
     metrics = [
@@ -593,7 +611,7 @@ def plot_word_count_by_sentiment(stats: pd.DataFrame, target: str) -> None:
 
     Parameters
     ----------
-    stats  : pd.DataFrame   output of build_stats()
+    stats  : pd.DataFrame   output of company_stats()
     target : str            company name
     """
     trow   = stats[stats['company'] == target].iloc[0]
@@ -643,7 +661,7 @@ def plot_word_count_by_sentiment(stats: pd.DataFrame, target: str) -> None:
             fontsize=9, fontweight='bold', color=color, va='center',
             arrowprops=dict(arrowstyle='->', color=color, lw=1.2)
         )
-    
+
     ax.set_ylim(bottom=0, top=150)
     ax.set_xticks(positions)
     ax.set_xticklabels([t for _, t, _ in tiers], fontsize=11)

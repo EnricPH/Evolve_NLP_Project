@@ -17,7 +17,7 @@ from transformers import pipeline as hf_pipeline
 
 SBERT_MODEL    = "all-MiniLM-L6-v2"          # fast, good quality
 SENTIMENT_MODEL = "cardiffnlp/twitter-roberta-base-sentiment-latest"
-MIN_TOPIC_SIZE  = 50                         # min reviews per topic
+MIN_TOPIC_SIZE  = 10                       # min reviews per topic
 N_TOP_WORDS     = 15                           # words shown per topic
 RANDOM_STATE    = 42
 
@@ -357,220 +357,9 @@ def assemble_results(
     return df
 
 
-# ══════════════════════════════════════════════════════════════════════
-# STAGE 7 — TOPIC-SENTIMENT AGGREGATION
-# ══════════════════════════════════════════════════════════════════════
-
-def topic_sentiment_summary(df: pd.DataFrame, exclude_outliers: bool = True) -> pd.DataFrame:
-    """
-    Aggregate sentiment counts and percentages per topic.
-
-    Returns one row per topic with:
-        topic_id      : int
-        topic_label   : str
-        n_reviews     : total reviews in topic
-        pct_positive  : % positive
-        pct_neutral   : % neutral
-        pct_negative  : % negative
-        dominant_sentiment : the sentiment with the highest %
-        net_sentiment : pct_positive − pct_negative  (−100 to +100)
-
-    Parameters
-    ----------
-    df               : pd.DataFrame   output of assemble_results()
-    exclude_outliers : bool           if True, drop topic_id == -1
-
-    Returns
-    -------
-    pd.DataFrame sorted by net_sentiment descending
-    """
-    if exclude_outliers:
-        df = df[df['topic_id'] != -1].copy()
-
-    agg = df.groupby(['topic_id', 'topic_label']).apply(lambda g: pd.Series({
-        'n_reviews'   : len(g),
-        'pct_positive': (g['sentiment'] == 'positive').mean() * 100,
-        'pct_neutral' : (g['sentiment'] == 'neutral').mean()  * 100,
-        'pct_negative': (g['sentiment'] == 'negative').mean() * 100,
-    })).reset_index()
-
-    agg['net_sentiment']      = agg['pct_positive'] - agg['pct_negative']
-    agg['dominant_sentiment'] = agg[['pct_positive', 'pct_neutral', 'pct_negative']].idxmax(axis=1)\
-                                    .str.replace('pct_', '')
-
-    return agg.sort_values('net_sentiment', ascending=False).reset_index(drop=True)
-
 
 # ══════════════════════════════════════════════════════════════════════
-# STAGE 8 — VISUALIZATIONS
-# ══════════════════════════════════════════════════════════════════════
-
-# ── 8.1 Topic distribution bar ─────────────────────────────────────────
-
-def plot_topic_distribution(df: pd.DataFrame, title: str, top_n: int = 15) -> None:
-    """
-    Horizontal bar chart of the most common topics by review count,
-    colored by dominant sentiment (green = positive, red = negative).
-
-    Parameters
-    ----------
-    df    : pd.DataFrame   output of assemble_results()
-    title : str            chart title (e.g. company name)
-    top_n : int            max topics to show
-    """
-    summary = topic_sentiment_summary(df)
-    summary = summary.head(top_n).sort_values('n_reviews')
-
-    color_map = {'positive': '#2ca02c', 'neutral': '#bcbd22', 'negative': '#d62728'}
-    colors = [color_map.get(s, 'gray') for s in summary['dominant_sentiment']]
-
-    fig, ax = plt.subplots(figsize=(11, max(4, len(summary) * 0.45)))
-    bars = ax.barh(summary['topic_label'], summary['n_reviews'], color=colors, edgecolor='white')
-
-    for bar, row in zip(bars, summary.itertuples()):
-        ax.text(bar.get_width() + 0.5, bar.get_y() + bar.get_height() / 2,
-                f"net={row.net_sentiment:+.0f}", va='center', fontsize=8)
-
-    legend_handles = [
-        mpatches.Patch(color='#2ca02c', label='Dominant: positive'),
-        mpatches.Patch(color='#bcbd22', label='Dominant: neutral'),
-        mpatches.Patch(color='#d62728', label='Dominant: negative'),
-    ]
-    ax.legend(handles=legend_handles, fontsize=9)
-    ax.set_xlabel("Number of Reviews")
-    ax.set_title(f"Topic Distribution — {title}", fontsize=13, fontweight='bold')
-    plt.tight_layout()
-    plt.show()
-
-
-# ── 8.2 Sentiment heatmap per topic ───────────────────────────────────
-
-def plot_sentiment_heatmap(summary: pd.DataFrame, title: str) -> None:
-    """
-    Heatmap where rows = topics, columns = positive/neutral/negative %,
-    sorted by net_sentiment so the best topics are at the top.
-
-    Parameters
-    ----------
-    summary : pd.DataFrame   output of topic_sentiment_summary()
-    title   : str            chart title
-    """
-    heat_df = summary.set_index('topic_label')[['pct_positive', 'pct_neutral', 'pct_negative']]
-    heat_df.columns = ['Positive %', 'Neutral %', 'Negative %']
-
-    fig, ax = plt.subplots(figsize=(9, max(4, len(heat_df) * 0.42)))
-    sns.heatmap(
-        heat_df, annot=True, fmt='.0f', cmap='RdYlGn',
-        vmin=0, vmax=100, linewidths=0.5, ax=ax,
-        cbar_kws={'label': '% of reviews', 'shrink': 0.7}
-    )
-    ax.set_title(f"Topic × Sentiment Heatmap — {title}", fontsize=13, fontweight='bold')
-    ax.set_ylabel("")
-    plt.tight_layout()
-    plt.show()
-
-
-# ── 8.3 Head-to-head: TARGET vs COMPETITORS (shared topics) ──────────
-
-def plot_head_to_head(
-    summary_target: pd.DataFrame,
-    summary_comp: pd.DataFrame,
-    target_name: str,
-    top_n: int = 12,
-) -> pd.DataFrame:
-    """
-    Side-by-side grouped bar chart comparing net_sentiment per topic
-    between the target company and competitors.
-
-    Only topics present in BOTH summaries are shown (inner join on
-    topic_label). Sorted by the gap (target − competitor) to immediately
-    surface strengths and weaknesses.
-
-    Parameters
-    ----------
-    summary_target : pd.DataFrame   topic_sentiment_summary() for target
-    summary_comp   : pd.DataFrame   topic_sentiment_summary() for competitors
-    target_name    : str            company display name
-    top_n          : int            number of topics to show
-
-    Returns
-    -------
-    pd.DataFrame   merged comparison table (also printed)
-    """
-    merged = summary_target[['topic_label', 'net_sentiment', 'n_reviews']]\
-        .merge(
-            summary_comp[['topic_label', 'net_sentiment', 'n_reviews']],
-            on='topic_label', suffixes=('_target', '_comp')
-        )
-
-    merged['gap'] = merged['net_sentiment_target'] - merged['net_sentiment_comp']
-    merged = merged.reindex(merged['gap'].abs().nlargest(top_n).index)
-    merged = merged.sort_values('gap')
-
-    fig, ax = plt.subplots(figsize=(12, max(5, len(merged) * 0.55)))
-    y = np.arange(len(merged))
-    bar_h = 0.35
-
-    ax.barh(y + bar_h / 2, merged['net_sentiment_target'], bar_h,
-            color='#1f77b4', label=target_name, edgecolor='white')
-    ax.barh(y - bar_h / 2, merged['net_sentiment_comp'], bar_h,
-            color='#aec7e8', label='Competitors avg', edgecolor='white')
-
-    ax.axvline(0, color='black', linewidth=0.8, linestyle='--')
-    ax.set_yticks(y)
-    ax.set_yticklabels(merged['topic_label'], fontsize=9)
-    ax.set_xlabel("Net Sentiment (% Positive − % Negative)")
-    ax.set_title(
-        f"Net Sentiment per Topic — {target_name} vs Competitors\n"
-        "(topics sorted by largest gap)",
-        fontsize=12, fontweight='bold'
-    )
-    ax.legend(fontsize=10)
-    plt.tight_layout()
-    plt.show()
-
-    return merged
-
-
-# ── 8.4 Strengths & weaknesses summary table ──────────────────────────
-
-def print_strengths_weaknesses(merged: pd.DataFrame, target_name: str, top_n: int = 5) -> None:
-    """
-    Print a plain-text summary of the top strengths (topics where target
-    outperforms competitors) and top weaknesses (topics where target
-    underperforms).
-
-    Parameters
-    ----------
-    merged      : pd.DataFrame   output of plot_head_to_head()
-    target_name : str
-    top_n       : int            number of topics in each list
-    """
-    strengths  = merged[merged['gap'] > 0].nlargest(top_n, 'gap')
-    weaknesses = merged[merged['gap'] < 0].nsmallest(top_n, 'gap')
-
-    print(f"\n{'='*60}")
-    print(f"  STRENGTHS — {target_name} outperforms competitors")
-    print(f"{'='*60}")
-    for _, row in strengths.iterrows():
-        print(f"  ✅  {row['topic_label'][:55]:<55}  gap = +{row['gap']:.0f}")
-
-    print(f"\n{'='*60}")
-    print(f"  WEAKNESSES — {target_name} underperforms competitors")
-    print(f"{'='*60}")
-    for _, row in weaknesses.iterrows():
-        print(f"  ⚠️   {row['topic_label'][:55]:<55}  gap = {row['gap']:.0f}")
-
-    print(f"\n{'='*60}")
-    print("  IMPROVEMENT AREAS (most negative net sentiment in target)")
-    print(f"{'='*60}")
-    improvement = merged.nsmallest(top_n, 'net_sentiment_target')
-    for _, row in improvement.iterrows():
-        print(f"  🔧  {row['topic_label'][:55]:<55}  net = {row['net_sentiment_target']:.0f}")
-
-
-# ══════════════════════════════════════════════════════════════════════
-# STAGE 9 — FINAL PIPELINE
+# STAGE 7 — PREPROCESSING PIPELINE
 # ══════════════════════════════════════════════════════════════════════
 
 def run_nlp_pipeline(df: pd.DataFrame, target: str) -> dict:
@@ -597,20 +386,18 @@ def run_nlp_pipeline(df: pd.DataFrame, target: str) -> dict:
     dict with keys:
         'df_target'        : reviews + topics + sentiment for target
         'df_competitors'   : reviews + topics + sentiment for competitors
-        'summary_target'   : topic-sentiment summary for target
-        'summary_comp'     : topic-sentiment summary for competitors
         'topic_model'      : fitted BERTopic instance
         'topic_labels'     : dict {id: label}
     """
     # ── Step 1 — Split ────────────────────────────────────────────────
-    print("\n[1/7] Splitting dataset ...")
+    print("\n[1/6] Splitting dataset ...")
     df_target, df_comp = split_target_competitors(df, target)
 
     texts_target = df_target['review'].tolist()
     texts_comp   = df_comp['review'].tolist()
 
     # ── Step 2 — Load SBERT once, embed both corpora ─────────────────
-    print("\n[2/7] Loading SBERT and embedding reviews ...")
+    print("\n[2/6] Loading SBERT and embedding reviews ...")
     from sentence_transformers import SentenceTransformer
     sbert = SentenceTransformer(SBERT_MODEL)
 
@@ -622,7 +409,7 @@ def run_nlp_pipeline(df: pd.DataFrame, target: str) -> dict:
     print(f"  ✓ Target embeddings     : {emb_target.shape}")
 
     # ── Step 3 — Fit topics on competitors (reuse loaded sbert) ──────
-    print("\n[3/7] Fitting BERTopic on competitors ...")
+    print("\n[3/6] Fitting BERTopic on competitors ...")
 
     umap_model = UMAP(n_neighbors=15, n_components=5, min_dist=0.0,
                       metric='cosine', random_state=RANDOM_STATE)
@@ -650,25 +437,681 @@ def run_nlp_pipeline(df: pd.DataFrame, target: str) -> dict:
     print(topic_info[topic_info['Topic'] != -1][['Topic','Count','Name']].head(15).to_string(index=False))
 
     # ── Step 4 — Transform target with same model ─────────────────────
-    print("\n[4/7] Assigning topics to target reviews ...")
+    print("\n[4/6] Assigning topics to target reviews ...")
     topics_target, _ = topic_model.transform(texts_target, emb_target)
 
     # ── Step 5 — Sentiment ────────────────────────────────────────────
-    print("\n[5/7] Running sentiment on target ...")
+    print("\n[5/6] Running sentiment on target ...")
     sent_target = run_sentiment(texts_target)
 
     print("\n  Running sentiment on competitors ...")
     sent_comp = run_sentiment(texts_comp)
 
     # ── Step 6 — Assemble ─────────────────────────────────────────────
-    print("\n[6/7] Assembling result DataFrames ...")
+    print("\n[6/6] Assembling result DataFrames ...")
     df_target_full = assemble_results(df_target, topics_target, sent_target, topic_labels)
     df_comp_full   = assemble_results(df_comp,   topics_comp,   sent_comp,   topic_labels)
 
-    # ── Step 7 — Summaries ────────────────────────────────────────────
-    print("\n[7/7] Building topic-sentiment summaries ...")
-    summary_target = topic_sentiment_summary(df_target_full)
-    summary_comp   = topic_sentiment_summary(df_comp_full)
+
+    return df_target_full, df_comp_full, topic_model
 
 
-    return df_target_full, df_comp_full, summary_target, summary_comp, topic_model
+
+# ══════════════════════════════════════════════════════════════════════
+# STAGE 10 — MACRO TOPIC MAPPING
+# Map granular BERTopic clusters (T0, T1 ...) into a small set of
+# business-meaningful macro categories relevant to Electronics & Tech
+# ══════════════════════════════════════════════════════════════════════
+
+# ── Define macro topic keyword groups ─────────────────────────────────
+# Each macro topic is defined by keywords that should appear in the
+# BERTopic label. The matching is done on the full topic label string
+# (which contains the top 4 keywords), case-insensitive.
+# Order matters — first match wins, so put specific terms before generic.
+
+MACRO_TOPIC_KEYWORDS = {
+    "Delivery & Shipping": [
+        "deliver", "shipping", "dispatch", "courier", "arrived",
+        "arrival", "parcel", "package", "tracked", "next day",
+        "day delivery", "quick delivery", "fast delivery",
+        "tried deliver", "delivering"
+    ],
+    "Order & Purchase Process": [
+        "order", "purchase", "bought", "checkout", "buy",
+        "ordered", "buying", "item purchased", "ordered item",
+        "ordered wrong", "ordered online", "easy purchase",
+        "went smoothly", "process"
+    ],
+    "Returns, Refunds & Cancellations": [
+        "refund", "return", "cancel", "cancelled", "refunded",
+        "replacement", "exchange", "money back", "service order",
+        "order cancelled"
+    ],
+    "Customer Service & Support": [
+        "customer service", "customer services", "support",
+        "helpful", "staff", "team", "agent", "contact",
+        "response", "replied", "communicate", "pleasant helpful",
+        "service friendly", "service helpful", "service quick",
+        "service excellent", "great service", "service received"
+    ],
+    "Product Quality & Condition": [
+        "quality", "condition", "refurbished", "excellent condition",
+        "product", "item", "received phone", "reliable",
+        "performance", "features", "functionality", "basic",
+        "repaired", "repairs", "micro repairs", "dryer", "washer",
+        "appliance"
+    ],
+    "Price & Value": [
+        "price", "value", "affordable", "cheap", "expensive",
+        "cost", "discount", "deal", "worth", "good discount",
+        "overall", "improvements"
+    ],
+    "Website & Online Experience": [
+        "website", "online", "tool", "easy use", "app",
+        "scam", "checkout", "billing", "contact", "review",
+        "easy use", "process", "use"
+    ],
+    "Repair & Technical Service": [
+        "repair", "repaired", "fix", "technician", "engineer",
+        "micro repairs", "repaired returned", "letting know",
+        "repair quickly"
+    ],
+}
+
+MACRO_OTHER = "General / Other"
+
+
+def assign_macro_topic(topic_label: str,
+                       keyword_map: dict = MACRO_TOPIC_KEYWORDS) -> str:
+    """
+    Map a granular BERTopic label to a macro business topic by keyword
+    matching on the label string.
+
+    The label is expected to follow the format produced by
+    get_topic_labels(): "TN: word1, word2, word3, word4".
+    Matching is case-insensitive and first-match wins, so the order of
+    keys in MACRO_TOPIC_KEYWORDS controls priority.
+
+    Parameters
+    ----------
+    topic_label  : str    BERTopic topic label string
+    keyword_map  : dict   {macro_topic_name: [keywords]}
+
+    Returns
+    -------
+    str   macro topic name, or MACRO_OTHER if no keyword matches
+    """
+    label_lower = topic_label.lower()
+    for macro, keywords in keyword_map.items():
+        if any(kw.lower() in label_lower for kw in keywords):
+            return macro
+    return MACRO_OTHER
+
+
+def add_macro_topics(df: pd.DataFrame,
+                     keyword_map: dict = MACRO_TOPIC_KEYWORDS) -> pd.DataFrame:
+    """
+    Add a 'macro_topic' column to an assembled results DataFrame by
+    applying assign_macro_topic() to every row's topic_label.
+
+    Outlier reviews (topic_id == -1) are labelled as MACRO_OTHER.
+
+    Parameters
+    ----------
+    df          : pd.DataFrame   output of assemble_results()
+    keyword_map : dict           macro topic keyword map
+
+    Returns
+    -------
+    pd.DataFrame   copy of df with new 'macro_topic' column
+    """
+    df = df.copy()
+    df['macro_topic'] = df['topic_label'].apply(
+        lambda lbl: MACRO_OTHER if lbl == "Outliers / uncategorised"
+        else assign_macro_topic(lbl, keyword_map)
+    )
+    return df
+
+
+def macro_topic_summary(df: pd.DataFrame,
+                        exclude_other: bool = False) -> pd.DataFrame:
+    """
+    Aggregate sentiment metrics at the macro topic level.
+
+    Parameters
+    ----------
+    df            : pd.DataFrame   output of add_macro_topics()
+    exclude_other : bool           drop 'General / Other' rows
+
+    Returns
+    -------
+    pd.DataFrame with columns:
+        macro_topic, n_reviews, pct_positive, pct_neutral,
+        pct_negative, net_sentiment, dominant_sentiment
+    Sorted by net_sentiment descending.
+    """
+    if exclude_other:
+        df = df[df['macro_topic'] != MACRO_OTHER].copy()
+
+    agg = df.groupby('macro_topic').apply(lambda g: pd.Series({
+        'n_reviews'   : len(g),
+        'pct_positive': (g['sentiment'] == 'positive').mean() * 100,
+        'pct_neutral' : (g['sentiment'] == 'neutral').mean()  * 100,
+        'pct_negative': (g['sentiment'] == 'negative').mean() * 100,
+    })).reset_index()
+
+    agg['net_sentiment']      = agg['pct_positive'] - agg['pct_negative']
+    agg['dominant_sentiment'] = agg[['pct_positive',
+                                      'pct_neutral',
+                                      'pct_negative']].idxmax(axis=1)\
+                                     .str.replace('pct_', '')
+    return agg.sort_values('net_sentiment', ascending=False).reset_index(drop=True)
+
+
+# ══════════════════════════════════════════════════════════════════════
+# STAGE 11 — MACRO TOPIC VISUALIZATIONS
+# ══════════════════════════════════════════════════════════════════════
+
+def plot_macro_distribution(df: pd.DataFrame, title: str) -> None:
+    """
+    Horizontal bar chart of macro topic review counts, colored by
+    dominant sentiment. Net sentiment annotated on each bar.
+
+    Parameters
+    ----------
+    df    : pd.DataFrame   output of add_macro_topics()
+    title : str            chart title
+    """
+    summary = macro_topic_summary(df, exclude_other=False)\
+                .sort_values('n_reviews')
+
+    color_map = {
+        'positive': '#2ca02c',
+        'neutral' : '#bcbd22',
+        'negative': '#d62728'
+    }
+    colors = [color_map.get(s, 'gray') for s in summary['dominant_sentiment']]
+
+    fig, ax = plt.subplots(figsize=(11, max(4, len(summary) * 0.55)))
+    bars = ax.barh(summary['macro_topic'], summary['n_reviews'],
+                   color=colors, edgecolor='white')
+
+    for bar, row in zip(bars, summary.itertuples()):
+        ax.text(
+            bar.get_width() + 0.5,
+            bar.get_y() + bar.get_height() / 2,
+            f"net={row.net_sentiment:+.0f}  ({row.n_reviews} reviews)",
+            va='center', fontsize=8.5
+        )
+
+    ax.legend(handles=[
+        mpatches.Patch(color='#2ca02c', label='Dominant: positive'),
+        mpatches.Patch(color='#bcbd22', label='Dominant: neutral'),
+        mpatches.Patch(color='#d62728', label='Dominant: negative'),
+    ], fontsize=9)
+    ax.set_xlabel("Number of Reviews")
+    ax.set_title(f"Macro Topic Distribution — {title}",
+                 fontsize=13, fontweight='bold')
+    plt.tight_layout()
+    plt.show()
+
+
+def plot_macro_heatmap(df_target: pd.DataFrame,
+                       df_comp: pd.DataFrame,
+                       target_name: str) -> None:
+    """
+    Side-by-side heatmaps showing positive / neutral / negative % per
+    macro topic for the target company and competitors.
+
+    Both heatmaps share the same row order (sorted by target net
+    sentiment) so differences are immediately visible.
+
+    Parameters
+    ----------
+    df_target   : pd.DataFrame   add_macro_topics() output for target
+    df_comp     : pd.DataFrame   add_macro_topics() output for competitors
+    target_name : str
+    """
+    s_target = macro_topic_summary(df_target, exclude_other=False)\
+                   .set_index('macro_topic')
+    s_comp   = macro_topic_summary(df_comp,   exclude_other=False)\
+                   .set_index('macro_topic')
+
+    # Shared row order = target net sentiment descending
+    row_order = s_target.sort_values('net_sentiment',
+                                     ascending=False).index.tolist()
+    # Add any macro topics that appear in competitors but not target
+    for t in s_comp.index:
+        if t not in row_order:
+            row_order.append(t)
+
+    cols = ['pct_positive', 'pct_neutral', 'pct_negative']
+    col_labels = ['Positive %', 'Neutral %', 'Negative %']
+
+    def _heat(s, order):
+        return s.reindex(order)[cols]\
+                .rename(columns=dict(zip(cols, col_labels)))\
+                .fillna(0)
+
+    heat_t = _heat(s_target, row_order)
+    heat_c = _heat(s_comp,   row_order)
+
+    fig, axes = plt.subplots(1, 2, figsize=(16, max(4, len(row_order) * 0.55)))
+
+    for ax, heat, title in zip(
+        axes,
+        [heat_t, heat_c],
+        [target_name, "Competitors avg"]
+    ):
+        sns.heatmap(
+            heat, annot=True, fmt='.0f', cmap='RdYlGn',
+            vmin=0, vmax=100, linewidths=0.5, ax=ax,
+            cbar_kws={'label': '% of reviews', 'shrink': 0.6}
+        )
+        ax.set_title(f"Macro Topic × Sentiment — {title}",
+                     fontsize=12, fontweight='bold')
+        ax.set_ylabel("")
+
+    plt.tight_layout()
+    plt.show()
+
+
+def plot_macro_head_to_head(df_target: pd.DataFrame,
+                             df_comp: pd.DataFrame,
+                             target_name: str) -> pd.DataFrame:
+    """
+    Grouped bar chart comparing net_sentiment per macro topic between
+    target and competitors. Sorted by gap (target − competitors) to
+    surface strengths and weaknesses immediately.
+
+    Parameters
+    ----------
+    df_target   : pd.DataFrame   add_macro_topics() output for target
+    df_comp     : pd.DataFrame   add_macro_topics() output for competitors
+    target_name : str
+
+    Returns
+    -------
+    pd.DataFrame   merged comparison table with gap column
+    """
+    s_t = macro_topic_summary(df_target, exclude_other=True)\
+              [['macro_topic', 'net_sentiment', 'n_reviews']]
+    s_c = macro_topic_summary(df_comp,   exclude_other=True)\
+              [['macro_topic', 'net_sentiment', 'n_reviews']]
+
+    merged = s_t.merge(s_c, on='macro_topic',
+                       suffixes=('_target', '_comp'))
+    merged['gap'] = merged['net_sentiment_target'] - merged['net_sentiment_comp']
+    merged = merged.sort_values('gap')
+
+    fig, ax = plt.subplots(figsize=(12, max(5, len(merged) * 0.65)))
+    y, h = np.arange(len(merged)), 0.35
+
+    ax.barh(y + h/2, merged['net_sentiment_target'], h,
+            color='#1f77b4', label=target_name, edgecolor='white')
+    ax.barh(y - h/2, merged['net_sentiment_comp'],   h,
+            color='#aec7e8', label='Competitors avg', edgecolor='white')
+
+    # Annotate gap
+    for i, row in enumerate(merged.itertuples()):
+        x_pos = max(row.net_sentiment_target, row.net_sentiment_comp) + 1
+        color = '#2ca02c' if row.gap > 0 else '#d62728'
+        ax.text(x_pos, i, f"Δ{row.gap:+.0f}",
+                va='center', fontsize=8, color=color, fontweight='bold')
+
+    ax.axvline(0, color='black', linewidth=0.8, linestyle='--')
+    ax.set_yticks(y)
+    ax.set_yticklabels(merged['macro_topic'], fontsize=10)
+    ax.set_xlabel("Net Sentiment (% Positive − % Negative)")
+    ax.set_title(
+        f"Macro Topic Net Sentiment — {target_name} vs Competitors\n"
+        "(sorted by gap: green Δ = we outperform, red Δ = we underperform)",
+        fontsize=12, fontweight='bold'
+    )
+    ax.legend(fontsize=10)
+    plt.tight_layout()
+    plt.show()
+
+    return merged
+
+
+def print_macro_strengths_weaknesses(merged: pd.DataFrame,
+                                      target_name: str) -> None:
+    """
+    Print macro-level strengths, weaknesses, and improvement priorities.
+
+    Parameters
+    ----------
+    merged      : pd.DataFrame   output of plot_macro_head_to_head()
+    target_name : str
+    """
+    strengths  = merged[merged['gap'] > 0].sort_values('gap', ascending=False)
+    weaknesses = merged[merged['gap'] < 0].sort_values('gap')
+
+    print(f"\n{'='*65}")
+    print(f"  MACRO STRENGTHS — {target_name} outperforms competitors")
+    print(f"{'='*65}")
+    for _, row in strengths.iterrows():
+        print(f"  ✅  {row['macro_topic']:<40}  "
+              f"net={row['net_sentiment_target']:+.0f}  gap=+{row['gap']:.0f}")
+
+    print(f"\n{'='*65}")
+    print(f"  MACRO WEAKNESSES — {target_name} underperforms competitors")
+    print(f"{'='*65}")
+    for _, row in weaknesses.iterrows():
+        print(f"  ⚠️   {row['macro_topic']:<40}  "
+              f"net={row['net_sentiment_target']:+.0f}  gap={row['gap']:.0f}")
+
+    print(f"\n{'='*65}")
+    print("  PRIORITY IMPROVEMENT AREAS (lowest net sentiment in target)")
+    print(f"{'='*65}")
+    worst = merged.sort_values('net_sentiment_target')
+    for _, row in worst.iterrows():
+        flag = '🔴' if row['net_sentiment_target'] < -25 else \
+               '🟡' if row['net_sentiment_target'] < 0   else '🟢'
+        print(f"  {flag}  {row['macro_topic']:<40}  "
+              f"net={row['net_sentiment_target']:+.0f}")
+
+
+# ══════════════════════════════════════════════════════════════════════
+# STAGE 12 — ROOT CAUSE EXTRACTION
+# For macro topics where we underperform, extract the exact reviews
+# and summarise the specific complaints driving negative sentiment
+# ══════════════════════════════════════════════════════════════════════
+
+def get_weak_macro_topics(merged: pd.DataFrame,
+                           min_gap: float = -5.0) -> list:
+    """
+    Return the list of macro topics where the target company
+    underperforms competitors by at least min_gap points.
+
+    Parameters
+    ----------
+    merged  : pd.DataFrame   output of plot_macro_head_to_head()
+    min_gap : float          gap threshold (negative = underperforming)
+                             e.g. -5.0 means gap < -5
+
+    Returns
+    -------
+    list of str   macro topic names sorted by gap ascending (worst first)
+    """
+    weak = merged[merged['gap'] < min_gap].sort_values('gap')
+    return weak['macro_topic'].tolist()
+
+
+def extract_negative_reviews(df_target: pd.DataFrame,
+                              macro_topic: str,
+                              sentiment_filter: str = 'negative') -> pd.DataFrame:
+    """
+    Extract raw reviews from the target company for a given macro topic,
+    filtered to a specific sentiment.
+
+    Parameters
+    ----------
+    df_target       : pd.DataFrame   add_macro_topics() output for target
+    macro_topic     : str            one of the keys in MACRO_TOPIC_KEYWORDS
+    sentiment_filter: str            'negative' | 'neutral' | 'positive' | 'all'
+
+    Returns
+    -------
+    pd.DataFrame   subset of df_target with columns:
+        company, stars, topic_label, macro_topic,
+        sentiment, sentiment_score, title, review
+    Sorted by stars ascending (worst reviews first).
+    """
+    mask = df_target['macro_topic'] == macro_topic
+    if sentiment_filter != 'all':
+        mask = mask & (df_target['sentiment'] == sentiment_filter)
+
+    cols = ['company', 'stars', 'topic_label', 'macro_topic',
+            'sentiment', 'sentiment_score', 'title', 'review']
+    available = [c for c in cols if c in df_target.columns]
+
+    return df_target[mask][available]\
+               .sort_values('stars', ascending=True)\
+               .reset_index(drop=True)
+
+
+def root_cause_report(df_target: pd.DataFrame,
+                       df_comp: pd.DataFrame,
+                       merged: pd.DataFrame,
+                       target_name: str,
+                       min_gap: float = -5.0,
+                       max_reviews_shown: int = 5) -> dict:
+    """
+    Full root cause analysis for all macro topics where the target
+    company underperforms competitors.
+
+    For each weak macro topic:
+        1. Prints the performance gap vs competitors
+        2. Shows the granular BERTopic sub-topics that map to it
+        3. Prints the most negative raw reviews verbatim (up to
+           max_reviews_shown), so the exact customer language is visible
+        4. Compares the word distribution of negative reviews between
+           target and competitors in that macro topic
+
+    Parameters
+    ----------
+    df_target         : pd.DataFrame   add_macro_topics() output for target
+    df_comp           : pd.DataFrame   add_macro_topics() output for competitors
+    merged            : pd.DataFrame   output of plot_macro_head_to_head()
+    target_name       : str
+    min_gap           : float          gap threshold to flag as weak
+    max_reviews_shown : int            max raw reviews printed per topic
+
+    Returns
+    -------
+    dict  {macro_topic: DataFrame of negative reviews}
+          Use this to inspect or export the full review text per topic.
+    """
+    weak_topics = get_weak_macro_topics(merged, min_gap=min_gap)
+
+    if not weak_topics:
+        print("✅ No macro topics found where gap is below threshold. "
+              "No clear underperformance vs competitors.")
+        return {}
+
+    all_negative_reviews = {}
+
+    for macro in weak_topics:
+        row = merged[merged['macro_topic'] == macro].iloc[0]
+
+        print(f"\n{'█'*65}")
+        print(f"  ROOT CAUSE — {macro}")
+        print(f"{'█'*65}")
+        print(f"  {target_name} net sentiment : {row['net_sentiment_target']:+.0f}")
+        print(f"  Competitors net sentiment   : {row['net_sentiment_comp']:+.0f}")
+        print(f"  Gap                         : {row['gap']:+.0f}  "
+              f"({'we underperform' if row['gap'] < 0 else 'we outperform'})")
+
+        # ── Sub-topics breakdown ───────────────────────────────────────
+        sub_mask   = df_target['macro_topic'] == macro
+        sub_topics = df_target[sub_mask]['topic_label'].value_counts()
+
+        print(f"\n  Granular sub-topics in this macro category:")
+        for topic_lbl, cnt in sub_topics.items():
+            sub_neg_pct = (
+                df_target[sub_mask & (df_target['topic_label'] == topic_lbl)]
+                ['sentiment'].eq('negative').mean() * 100
+            )
+            flag = '🔴' if sub_neg_pct > 60 else '🟡' if sub_neg_pct > 30 else '🟢'
+            print(f"    {flag}  {topic_lbl:<55}  "
+                  f"n={cnt:>3}   neg={sub_neg_pct:.0f}%")
+
+        # ── Raw negative reviews ───────────────────────────────────────
+        neg_reviews = extract_negative_reviews(df_target, macro,
+                                               sentiment_filter='negative')
+        all_negative_reviews[macro] = neg_reviews
+
+        print(f"\n  Most negative reviews ({len(neg_reviews)} total "
+              f"negative, showing {min(max_reviews_shown, len(neg_reviews))}):")
+
+        for i, rev in neg_reviews.head(max_reviews_shown).iterrows():
+            stars_str = '★' * int(rev['stars']) + '☆' * (5 - int(rev['stars']))
+            title_str = rev.get('title', '')
+            print(f"\n  [{i+1}] {stars_str}  |  {title_str}")
+            print(f"  Sub-topic : {rev['topic_label']}")
+            print(f"  Review    : {rev['review'][:500]}"
+                  f"{'...' if len(str(rev['review'])) > 500 else ''}")
+
+        # ── Word frequency comparison: target vs competitors ──────────
+        _plot_word_gap(df_target, df_comp, macro, target_name)
+
+    return all_negative_reviews
+
+
+def _plot_word_gap(df_target: pd.DataFrame,
+                   df_comp: pd.DataFrame,
+                   macro_topic: str,
+                   target_name: str,
+                   top_n: int = 15) -> None:
+    """
+    Internal helper: side-by-side word frequency bar charts for
+    NEGATIVE reviews in a given macro topic, comparing target vs
+    competitors. Reveals the specific language driving dissatisfaction.
+
+    Parameters
+    ----------
+    df_target   : pd.DataFrame   add_macro_topics() output for target
+    df_comp     : pd.DataFrame   add_macro_topics() output for competitors
+    macro_topic : str
+    target_name : str
+    top_n       : int            words to display per panel
+    """
+    stop = {
+        'the','and','for','was','are','has','had','have','been','with',
+        'this','that','they','from','not','but','its','our','your',
+        'their','all','just','very','also','more','than','did','one',
+        'got','get','can','it','is','in','to','of','a','an','on','at',
+        'be','my','we','i','me','he','she','us','you','so','if','or',
+        'as','by','do','no','up','out','his','her','him','who','what',
+        'how','would','could','should','still','even','then','when',
+    }
+
+    def _freq(df, macro):
+        neg = df[(df['macro_topic'] == macro) &
+                 (df['sentiment'] == 'negative')]['review'].fillna('')
+        counts = {}
+        for text in neg:
+            for w in str(text).lower().split():
+                w = w.strip('.,!?:;"\'')
+                if w.isalpha() and len(w) > 3 and w not in stop:
+                    counts[w] = counts.get(w, 0) + 1
+        return pd.Series(counts).sort_values(ascending=False).head(top_n)
+
+    freq_t = _freq(df_target, macro_topic)
+    freq_c = _freq(df_comp,   macro_topic)
+
+    if freq_t.empty and freq_c.empty:
+        return
+
+    fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+    for ax, freq, label, color in zip(
+        axes,
+        [freq_t, freq_c],
+        [f"{target_name}\nnegative reviews", "Competitors\nnegative reviews"],
+        ['#d62728', '#ff7f7f']
+    ):
+        if freq.empty:
+            ax.text(0.5, 0.5, 'No negative reviews', ha='center',
+                    va='center', transform=ax.transAxes)
+        else:
+            freq_sorted = freq.sort_values()
+            ax.barh(freq_sorted.index, freq_sorted.values,
+                    color=color, edgecolor='white', alpha=0.85)
+        ax.set_title(label, fontsize=11, fontweight='bold')
+        ax.set_xlabel("Word frequency in negative reviews")
+
+    fig.suptitle(f"Most Common Words in Negative Reviews — {macro_topic}",
+                 fontsize=12, fontweight='bold')
+    plt.tight_layout()
+    plt.show()
+
+
+# ══════════════════════════════════════════════════════════════════════
+# STAGE 13 — FULL MACRO PIPELINE
+# ══════════════════════════════════════════════════════════════════════
+
+def run_macro_analysis(df_target_full: pd.DataFrame,
+                        df_comp_full: pd.DataFrame,
+                        target_name: str,
+                        min_gap: float = -5.0,
+                        max_reviews_shown: int = 5) -> dict:
+    """
+    Full macro topic analysis pipeline. Call this after run_nlp_pipeline().
+
+    Steps
+    -----
+    1.  Assign macro topics to target and competitor DataFrames
+    2.  Print macro topic distribution for target
+    3.  Plot macro topic distribution bar (target)
+    4.  Plot macro topic distribution bar (competitors)
+    5.  Plot side-by-side sentiment heatmaps
+    6.  Plot head-to-head net sentiment comparison
+    7.  Print macro strengths, weaknesses, and improvement priorities
+    8.  Run root cause analysis on all underperforming macro topics:
+        - Sub-topic breakdown
+        - Raw negative reviews printed verbatim
+        - Word frequency comparison (target vs competitors)
+
+    Parameters
+    ----------
+    df_target_full    : pd.DataFrame   output of assemble_results() for target
+    df_comp_full      : pd.DataFrame   output of assemble_results() for competitors
+    target_name       : str
+    min_gap           : float          threshold for flagging weak topics (default −5)
+    max_reviews_shown : int            raw reviews shown per weak topic (default 5)
+
+    Returns
+    -------
+    dict with keys:
+        'df_target_macro'  : target DataFrame with macro_topic column
+        'df_comp_macro'    : competitor DataFrame with macro_topic column
+        'summary_target'   : macro_topic_summary() for target
+        'summary_comp'     : macro_topic_summary() for competitors
+        'merged'           : head-to-head comparison DataFrame
+        'negative_reviews' : {macro_topic: DataFrame of negative reviews}
+    """
+
+    # ── Step 1 — Assign macro topics ──────────────────────────────────
+    print("\n[1/5] Assigning macro topics ...")
+    df_t = add_macro_topics(df_target_full)
+    df_c = add_macro_topics(df_comp_full)
+
+    macro_counts_t = df_t['macro_topic'].value_counts()
+    print(f"\n  Macro topic distribution in {target_name}:")
+    print(macro_counts_t.to_string())
+
+    # ── Step 2 — Distribution plots ───────────────────────────────────
+    print(f"\n[2/5] Macro topic distribution plots ...")
+    plot_macro_distribution(df_t, title=target_name)
+    plot_macro_distribution(df_c, title="Competitors")
+
+    # ── Step 3 — Side-by-side heatmaps ────────────────────────────────
+    print("\n[3/5] Macro sentiment heatmaps ...")
+    plot_macro_heatmap(df_t, df_c, target_name=target_name)
+
+    # ── Step 4 — Head-to-head ─────────────────────────────────────────
+    print("\n[4/5] Head-to-head net sentiment ...")
+    merged = plot_macro_head_to_head(df_t, df_c, target_name=target_name)
+    print_macro_strengths_weaknesses(merged, target_name=target_name)
+
+    # ── Step 5 — Root cause ───────────────────────────────────────────
+    print(f"\n[5/5] Root cause extraction (gap threshold = {min_gap}) ...")
+    neg_reviews = root_cause_report(
+        df_target=df_t,
+        df_comp=df_c,
+        merged=merged,
+        target_name=target_name,
+        min_gap=min_gap,
+        max_reviews_shown=max_reviews_shown
+    )
+
+    return {
+        'df_target_macro' : df_t,
+        'df_comp_macro'   : df_c,
+        'summary_target'  : macro_topic_summary(df_t),
+        'summary_comp'    : macro_topic_summary(df_c),
+        'merged'          : merged,
+        'negative_reviews': neg_reviews,
+    }

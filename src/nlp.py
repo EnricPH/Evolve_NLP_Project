@@ -23,7 +23,7 @@ RANDOM_STATE    = 42
 
 
 # ══════════════════════════════════════════════════════════════════════
-# STAGE 2 — PREP: split target vs competitors
+# STAGE 1 — PREP: split target vs competitors
 # ══════════════════════════════════════════════════════════════════════
 
 def split_target_competitors(df: pd.DataFrame, target: str) -> tuple:
@@ -68,7 +68,7 @@ def split_target_competitors(df: pd.DataFrame, target: str) -> tuple:
 
 
 # ══════════════════════════════════════════════════════════════════════
-# STAGE 3 — EMBED: sentence embeddings with SBERT
+# STAGE 2 — EMBED: sentence embeddings with SBERT
 # ══════════════════════════════════════════════════════════════════════
 
 def embed_reviews(texts: list, model_name: str = SBERT_MODEL,
@@ -105,7 +105,7 @@ def embed_reviews(texts: list, model_name: str = SBERT_MODEL,
 
 
 # ══════════════════════════════════════════════════════════════════════
-# STAGE 4 — TOPIC MODELLING with BERTopic
+# STAGE 3 — TOPIC MODELLING with BERTopic
 # ══════════════════════════════════════════════════════════════════════
 
 def build_topic_model(
@@ -250,7 +250,7 @@ def get_topic_labels(topic_model: BERTopic) -> dict:
 
 
 # ══════════════════════════════════════════════════════════════════════
-# STAGE 5 — SENTIMENT ANALYSIS per review
+# STAGE 4 — SENTIMENT ANALYSIS per review
 # ══════════════════════════════════════════════════════════════════════
 
 def run_sentiment(
@@ -319,7 +319,7 @@ def run_sentiment(
 
 
 # ══════════════════════════════════════════════════════════════════════
-# STAGE 6 — ASSEMBLE: merge topics + sentiment into one DataFrame
+# STAGE 5 — ASSEMBLE: merge topics + sentiment into one DataFrame
 # ══════════════════════════════════════════════════════════════════════
 
 def assemble_results(
@@ -359,7 +359,7 @@ def assemble_results(
 
 
 # ══════════════════════════════════════════════════════════════════════
-# STAGE 7 — PREPROCESSING PIPELINE
+# STAGE 6 — PREPROCESSING PIPELINE
 # ══════════════════════════════════════════════════════════════════════
 
 def run_nlp_pipeline(df: pd.DataFrame, target: str) -> dict:
@@ -458,7 +458,7 @@ def run_nlp_pipeline(df: pd.DataFrame, target: str) -> dict:
 
 
 # ══════════════════════════════════════════════════════════════════════
-# STAGE 10 — MACRO TOPIC MAPPING
+# STAGE 7 — MACRO TOPIC MAPPING
 # Map granular BERTopic clusters (T0, T1 ...) into a small set of
 # business-meaningful macro categories relevant to Electronics & Tech
 # ══════════════════════════════════════════════════════════════════════
@@ -609,7 +609,7 @@ def macro_topic_summary(df: pd.DataFrame,
 
 
 # ══════════════════════════════════════════════════════════════════════
-# STAGE 11 — MACRO TOPIC VISUALIZATIONS
+# STAGE 8 — MACRO TOPIC VISUALIZATIONS
 # ══════════════════════════════════════════════════════════════════════
 
 def plot_macro_distribution(df: pd.DataFrame, title: str) -> None:
@@ -814,7 +814,7 @@ def print_macro_strengths_weaknesses(merged: pd.DataFrame,
 
 
 # ══════════════════════════════════════════════════════════════════════
-# STAGE 12 — ROOT CAUSE EXTRACTION
+# STAGE 9 — ROOT CAUSE EXTRACTION
 # For macro topics where we underperform, extract the exact reviews
 # and summarise the specific complaints driving negative sentiment
 # ══════════════════════════════════════════════════════════════════════
@@ -1029,7 +1029,7 @@ def _plot_word_gap(df_target: pd.DataFrame,
 
 
 # ══════════════════════════════════════════════════════════════════════
-# STAGE 13 — FULL MACRO PIPELINE
+# STAGE 10 — FULL MACRO PIPELINE
 # ══════════════════════════════════════════════════════════════════════
 
 def run_macro_analysis(df_target_full: pd.DataFrame,

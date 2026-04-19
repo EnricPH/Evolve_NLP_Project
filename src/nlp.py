@@ -704,6 +704,8 @@ def root_cause_report(
     all_negative_reviews = {}
 
     for macro in weak_topics:
+        if len(df_target[df_target['macro_topic']==macro])<10:
+            continue
         row = merged[merged['macro_topic'] == macro].iloc[0]
 
         print(f"\n{'█'*65}")
@@ -718,16 +720,18 @@ def root_cause_report(
         )
         all_negative_reviews[macro] = neg_reviews
 
-        print(f"\n  Negative reviews: {len(neg_reviews)} total — "
-              f"showing {min(max_reviews_shown, len(neg_reviews))}")
+        # print(f"\n  Negative reviews: {len(neg_reviews)} total — "
+        #       f"showing {min(max_reviews_shown, len(neg_reviews))}")
 
-        for i, rev in neg_reviews.head(max_reviews_shown).iterrows():
-            stars_str = '★' * int(rev['stars']) + '☆' * (5 - int(rev['stars']))
-            sim_str   = f"(sim={rev.get('topic_similarity', 0):.2f})"
-            print(f"\n  [{i+1}] {stars_str}  {sim_str}  |  "
-                  f"{rev.get('title', '')}")
-            print(f"  Review : {str(rev['review'])[:500]}"
-                  f"{'...' if len(str(rev['review'])) > 500 else ''}")
+        # for i, rev in neg_reviews.head(max_reviews_shown).iterrows():
+        #     if rev.get('topic_similarity', 0) < 0.3:
+        #         continue
+        #     stars_str = '★' * int(rev['stars']) + '☆' * (5 - int(rev['stars']))
+        #     sim_str   = f"(sim={rev.get('topic_similarity', 0):.2f})"
+        #     print(f"\n  [{i+1}] {stars_str}  {sim_str}  |  "
+        #           f"{rev.get('title', '')}")
+        #     print(f"  Review : {str(rev['review'])[:500]}"
+        #           f"{'...' if len(str(rev['review'])) > 500 else ''}")
 
         _plot_word_gap(df_target, df_comp, macro, target_name)
 

@@ -13,5 +13,7 @@ src/__pycache__/
 venv/
 
 # Large datasets (exclude entire datasets folder)
-datasets/
+#datasets/
+*.xlsx
 *.csv
+

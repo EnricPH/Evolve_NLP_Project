@@ -902,18 +902,18 @@ def run_macro_pipeline(
     # ── Visualizations ────────────────────────────────────────────────
     print(f"\n{'─'*55}\n  VISUALIZATIONS\n{'─'*55}")
 
-    plot_macro_distribution(df_t, title=target)
-    plot_macro_distribution(df_c, title="Competitors")
-    plot_macro_heatmap(df_t, df_c, target_name=target)
-    merged = plot_macro_head_to_head(df_t, df_c, target_name=target)
-    print_macro_strengths_weaknesses(merged, target_name=target)
+    # plot_macro_distribution(df_t, title=target)
+    # plot_macro_distribution(df_c, title="Competitors")
+    # plot_macro_heatmap(df_t, df_c, target_name=target)
+    # merged = plot_macro_head_to_head(df_t, df_c, target_name=target)
+    # print_macro_strengths_weaknesses(merged, target_name=target)
 
-    # ── Root cause ────────────────────────────────────────────────────
-    neg_reviews = root_cause_report(
-        df_target=df_t, df_comp=df_c,
-        merged=merged, target_name=target,
-        min_gap=min_gap, max_reviews_shown=max_reviews_shown
-    )
+    # # ── Root cause ────────────────────────────────────────────────────
+    # neg_reviews = root_cause_report(
+    #     df_target=df_t, df_comp=df_c,
+    #     merged=merged, target_name=target,
+    #     min_gap=min_gap, max_reviews_shown=max_reviews_shown
+    # )
 
     return {
         'df_target'       : df_t,
@@ -921,6 +921,6 @@ def run_macro_pipeline(
         'summary_target'  : macro_topic_summary(df_t),
         'summary_comp'    : macro_topic_summary(df_c),
         'seed_centroids'  : seed_centroids,   
-        'merged'          : merged,
-        'negative_reviews': neg_reviews,
+        # 'merged'          : merged,
+        # 'negative_reviews': neg_reviews,
     }

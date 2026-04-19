@@ -99,39 +99,6 @@ def add_length_features(df: pd.DataFrame) -> pd.DataFrame:
 # ══════════════════════════════════════════════════════════════════════
 
 def company_stats(df: pd.DataFrame) -> pd.DataFrame:
-    # """
-    # Compute per-company aggregate statistics.
-
-    # Aggregates:
-    #     - review_count       : total number of reviews
-    #     - avg_stars          : mean star rating
-    #     - pct_positive       : % of reviews with stars >= 4
-    #     - pct_negative       : % of reviews with stars <= 2
-    #     - avg_review_words   : mean word count of reviews
-    #     - avg_title_words    : mean word count of titles
-
-    # Parameters
-    # ----------
-    # df : pd.DataFrame
-    #     DataFrame output of add_length_features().
-
-    # Returns
-    # -------
-    # pd.DataFrame
-    #     One row per company, sorted by avg_stars descending.
-    # """
-    # stats = df.groupby('company').agg(
-    #     review_count     = ('review', 'count'),
-    #     avg_stars        = ('stars',  'mean'),
-    #     pct_positive     = ('stars',  lambda x: (x >= 4).mean() * 100),
-    #     pct_negative     = ('stars',  lambda x: (x <= 2).mean() * 100),
-    #     avg_review_words = ('review_word_count', 'mean'),
-    #     avg_title_words  = ('title_word_count',  'mean'),
-    # ).round(2).sort_values('avg_stars', ascending=False)
-
-    # return stats
-
-
 
     """
     Compute per-company statistics needed for positioning charts.
@@ -162,19 +129,6 @@ def company_stats(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     df['word_count'] = df['review'].fillna('').str.split().str.len()
 
-    # stats = df.groupby('company').apply(lambda g: pd.Series({
-    #     'avg_stars'        : g['stars'].mean(),
-    #     'pct_positive'     : (g['stars'] >= 4).mean() * 100,
-    #     'pct_neutral'      : (g['stars'] == 3).mean() * 100,
-    #     'pct_negative'     : (g['stars'] <= 2).mean() * 100,
-    #     'avg_review_words' : g['review_word_count'].mean(),
-    #     'avg_title_words'  : g['title_word_count'].mean(),
-    #     'review_word_count': g['word_count'].mean(),
-    #     'wc_positive'      : g.loc[g['stars'] >= 4, 'word_count'].mean(),
-    #     'wc_neutral'       : g.loc[g['stars'] == 3, 'word_count'].mean(),
-    #     'wc_negative'      : g.loc[g['stars'] <= 2, 'word_count'].mean(),
-    #     'review_count'     : len(g),
-    # })).round(2).sort_values('avg_stars', ascending=False)
     stats = df.groupby('company').agg(
         avg_stars        = ('stars', 'mean'),
         pct_positive     = ('stars', lambda x: (x >= 4).mean() * 100),
